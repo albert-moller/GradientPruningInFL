@@ -37,10 +37,9 @@ def train_client(id, client_dataloader, global_model, num_local_epochs, lr, devi
             loss = criterion(predict, label)
             loss.backward()
             # Optionally: prune_gradients(local_model)
-            optimizer.step()
-        
-        model_path = os.path.join(save_dir, f'local_model_epoch_{epoch}.pt')
-        torch.save(local_model.state_dict(), model_path)
+            optimizer.step()        
+        # model_path = os.path.join(save_dir, f'local_model_epoch_{epoch}.pt')
+        # torch.save(local_model.state_dict(), model_path)
 
     return local_model
 
