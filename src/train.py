@@ -4,6 +4,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import os
+from torchvision import transforms
+from src.idlg import iDLG
+import matplotlib.pyplot as plt
 
 def validation(model, test_dataloader, device):
     model = model.to(device)
@@ -20,14 +23,11 @@ def validation(model, test_dataloader, device):
     accuracy = num_correct / total
     return accuracy
 
-def train_client(id, client_dataloader, global_model, num_local_epochs, lr, device, criterion):
+def train_client(id, client_dataloader, global_model, num_local_epochs, lr, device, criterion, filtered_train_dataset):
     local_model = copy.deepcopy(global_model)
     local_model.to(device)
     local_model.train()
     optimizer = torch.optim.Adam(local_model.parameters(), lr=lr)
-
-    save_dir = f'saved_models/client_{id}'
-    os.makedirs(save_dir, exist_ok=True)
 
     for epoch in range(num_local_epochs):
         for (index, (img, label)) in enumerate(client_dataloader):
@@ -38,8 +38,33 @@ def train_client(id, client_dataloader, global_model, num_local_epochs, lr, devi
             loss.backward()
             # Optionally: prune_gradients(local_model)
             optimizer.step()        
-        # model_path = os.path.join(save_dir, f'local_model_epoch_{epoch}.pt')
-        # torch.save(local_model.state_dict(), model_path)
+
+        #Perform gradient inversion attack using iDLG:
+        img_index = 0
+        image, label = filtered_train_dataset[img_index]
+        tp = transforms.ToTensor()
+        tt = transforms.ToPILImage()
+       
+        gt_data = image.to(device)
+        gt_data = gt_data.view(1, *gt_data.size())
+
+        gt_label = torch.Tensor([label]).long().to(device)
+        gt_label = gt_label.view(1,)
+
+        idlg = iDLG(model = local_model, gt_data=gt_data, label=gt_label, device=device)
+        dummy_data, history, losses = idlg.attack()
+        iteration = 300
+        
+        print("\n")
+        print(f"Client {id}, epoch {epoch}, reconstruction performance using iDLG:")
+
+        plt.figure(figsize=(12,8))
+        for i in range(int(iteration/10)):
+            plt.subplot(int(iteration/100),10,i+1)
+            plt.imshow(history[i])
+            plt.title("iter=%d"%(i*10))
+            plt.axis('off')
+        plt.show()
 
     return local_model
 
@@ -53,7 +78,7 @@ def global_model_average(curr, next, scale):
             curr[key] = curr[key] + (next[key]*scale)  
     return curr
 
-def federated_learning_experiment(global_model, num_clients_per_round, num_local_epochs, lr, client_train_loader, max_rounds, device, criterion, test_dataloader):
+def federated_learning_experiment(global_model, num_clients_per_round, num_local_epochs, lr, client_train_loader, max_rounds, device, criterion, test_dataloader, filtered_train_dataset):
     round_train_accuracy = []
     for round in range(max_rounds):
         print(f"Round {round} is starting")
@@ -65,7 +90,7 @@ def federated_learning_experiment(global_model, num_clients_per_round, num_local
 
         for index, client in enumerate(clients):
             print(f"round {round}, starting client {(index+1)}/{num_clients_per_round}, id: {client}")
-            local_model = train_client(client, client_train_loader[client], global_model, num_local_epochs, lr, device=device, criterion=criterion)
+            local_model = train_client(client, client_train_loader[client], global_model, num_local_epochs, lr, device=device, criterion=criterion, filtered_train_dataset=filtered_train_dataset)
             running_avg = global_model_average(running_avg, local_model.state_dict(), 1/num_clients_per_round) 
 
         global_model.load_state_dict(running_avg)
