@@ -1,7 +1,7 @@
 import torch.nn as nn
 
 class LeNet(nn.Module):
-    def __init__(self, channel=3, hideen=768, num_classes=10):
+    def __init__(self, channel=3, hidden=768, num_classes=5):
         super(LeNet, self).__init__()
         act = nn.Sigmoid
         self.body = nn.Sequential(
@@ -13,7 +13,7 @@ class LeNet(nn.Module):
             act(),
         )
         self.fc = nn.Sequential(
-            nn.Linear(hideen, num_classes)
+            nn.Linear(hidden, num_classes)
         )
 
     def forward(self, x):

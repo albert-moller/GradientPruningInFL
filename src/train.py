@@ -6,7 +6,9 @@ import torch.nn.functional as F
 import os
 from torchvision import transforms
 from src.idlg import iDLG
+from src.metrics import Metrics
 import matplotlib.pyplot as plt
+from tqdm import tqdm
 
 def validation(model, test_dataloader, device):
     model = model.to(device)
@@ -34,8 +36,14 @@ def prune_gradients(model, thres, alpha):
             grad_above_thresh = param.grad.data.abs() > threshold
             param.grad.data[grad_above_thresh] *= alpha
 
+def prepare_tensor_for_plotting(tensor):
+    np_image = tensor.cpu().numpy()
+    np_image = np.transpose(np_image, (1, 2, 0))
+    if np_image.min() < 0 or np_image.max() > 1:
+        np_image = (np_image - np_image.min()) / (np_image.max() - np_image.min())
+    return np_image
 
-def train_client(id, client_dataloader, global_model, num_local_epochs, lr, device, criterion, filtered_train_dataset, prune=False):
+def train_client(id, global_round_num, client_dataloader, global_model, num_local_epochs, lr, device, criterion, filtered_train_dataset, idlg = True, prune=False):
     local_model = copy.deepcopy(global_model)
     local_model.to(device)
     local_model.train()
@@ -57,32 +65,74 @@ def train_client(id, client_dataloader, global_model, num_local_epochs, lr, devi
                 prune_gradients(local_model, thres=thres, alpha=alpha)
             optimizer.step()        
 
-        #Perform gradient inversion attack using iDLG:
-        img_index = 0
-        image, label = filtered_train_dataset[img_index]
-        tp = transforms.ToTensor()
-        tt = transforms.ToPILImage()
-       
-        gt_data = image.to(device)
-        gt_data = gt_data.view(1, *gt_data.size())
+        if epoch == 0 and idlg is True and global_round_num == 0:
 
-        gt_label = torch.Tensor([label]).long().to(device)
-        gt_label = gt_label.view(1,)
+            #Perform gradient inversion attack using iDLG:
+            reconstructed_imgs = []
+            ground_truth_imgs = []
+            extracted_labels = []
+            ground_truth_labels = []
 
-        idlg = iDLG(model = local_model, gt_data=gt_data, label=gt_label, device=device)
-        dummy_data, history, losses = idlg.attack()
-        iteration = 300
-        
-        print("\n")
-        print(f"Client {id}, epoch {epoch}, reconstruction performance using iDLG:")
+            for idx in tqdm(range(len(filtered_train_dataset)), desc="Reconstructing training images using iDLG"):
+                img_index = idx
+                image, label = filtered_train_dataset[img_index]
+                ground_truth_imgs.append(image)
+                ground_truth_labels.append(label)
+                tp = transforms.ToTensor()
+                tt = transforms.ToPILImage()
+            
+                gt_data = image.to(device)
+                gt_data = gt_data.view(1, *gt_data.size())
 
-        plt.figure(figsize=(12,8))
-        for i in range(int(iteration/10)):
-            plt.subplot(int(iteration/100),10,i+1)
-            plt.imshow(history[i])
-            plt.title("iter=%d"%(i*10))
-            plt.axis('off')
-        plt.show()
+                gt_label = torch.Tensor([label]).long().to(device)
+                gt_label = gt_label.view(1,)
+
+                idlg = iDLG(model = local_model, gt_data=gt_data, label=gt_label, device=device)
+                dummy_data, label_predict, history, losses = idlg.attack()
+                extracted_labels.append(label_predict)
+                iteration = 300
+                reconstructed_imgs.append(history[-1])
+
+            metrics = Metrics(ground_truth_imgs, reconstructed_imgs, ground_truth_labels, extracted_labels)
+            mse = metrics.compute_mse()
+            print(f"Mean squared error: {mse}")
+            label_accuracy = metrics.compute_label_accuracy()
+            print(f"Label extract accuracy: {label_accuracy} %")
+            psnr = metrics.compute_psnr()
+            print(f"Peak Signal-to-Noise-Ratio: {psnr}")
+            ssim = metrics.compute_ssim()
+            print(f"Structural Similiarity Index Measure: {ssim}")
+
+                # print("\n")
+                # print(f"Client {id}, epoch {epoch}, reconstruction performance using iDLG:")
+
+                # plt.figure(figsize=(12,8))
+                # for i in range(int(iteration/10)):
+                #     plt.subplot(int(iteration/100),10,i+1)
+                #     plt.imshow(history[i])
+                #     plt.title("iter=%d"%(i*10))
+                #     plt.axis('off')
+                # plt.show()
+
+            print("\n")
+            print(f"Client {id}, epoch {epoch}, reconstruction performance using iDLG:")
+
+            ground_truth_imgs_for_plotting = [prepare_tensor_for_plotting(img.squeeze(0)) for img in ground_truth_imgs]
+            plt.figure(figsize=(20, 10))
+
+            for i in range(25):
+                plt.subplot(5, 10, 2*i + 1)
+                plt.imshow(ground_truth_imgs_for_plotting[i])
+                plt.title(f"GT {i}")
+                plt.axis('off')
+
+                plt.subplot(5, 10, 2*i + 2)
+                plt.imshow(reconstructed_imgs[i])
+                plt.title(f"Recon {i}")
+                plt.axis('off')
+
+            plt.tight_layout()
+            plt.show()
 
     return local_model
 
@@ -96,7 +146,7 @@ def global_model_average(curr, next, scale):
             curr[key] = curr[key] + (next[key]*scale)  
     return curr
 
-def federated_learning_experiment(global_model, num_clients_per_round, num_local_epochs, lr, client_train_loader, max_rounds, device, criterion, test_dataloader, filtered_train_dataset, prune=False):
+def federated_learning_experiment(global_model, num_clients_per_round, num_local_epochs, lr, client_train_loader, max_rounds, device, criterion, test_dataloader, filtered_train_dataset, idlg = True, prune=False):
     round_train_accuracy = []
     for round in range(max_rounds):
         print(f"Round {round} is starting")
@@ -108,7 +158,7 @@ def federated_learning_experiment(global_model, num_clients_per_round, num_local
 
         for index, client in enumerate(clients):
             print(f"round {round}, starting client {(index+1)}/{num_clients_per_round}, id: {client}")
-            local_model = train_client(client, client_train_loader[client], global_model, num_local_epochs, lr, device=device, criterion=criterion, filtered_train_dataset=filtered_train_dataset, prune=prune)
+            local_model = train_client(client, round, client_train_loader[client], global_model, num_local_epochs, lr, device=device, criterion=criterion, filtered_train_dataset=filtered_train_dataset[client], idlg=idlg, prune=prune)
             running_avg = global_model_average(running_avg, local_model.state_dict(), 1/num_clients_per_round) 
 
         global_model.load_state_dict(running_avg)

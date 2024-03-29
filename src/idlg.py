@@ -56,7 +56,7 @@ class iDLG:
                 losses.append(current_loss)
                 history.append(self.tt(dummy_data[0].cpu()))
 
-        return dummy_data, history, losses
+        return dummy_data, label_pred, history, losses
 
 
 
