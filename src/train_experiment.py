@@ -71,12 +71,15 @@ def train_client(id, global_round_num, client_dataloader, global_model, num_loca
     local_model.train()
     optimizer = torch.optim.Adam(local_model.parameters(), lr=lr)
 
+    #label mapping for CIFAR5
+    label_mapping = {0: 0, 9: 1, 6: 2, 1: 3, 8: 4}
+
     #parameters for pruning
     thres = 95
 
     for epoch in range(num_local_epochs):
         for (index, (img, label)) in enumerate(client_dataloader):
-            img, label = img.to(device), label.to(device)
+            img, label = img.to(device), torch.tensor([label_mapping[l.item()] for l in label], device=device)
             optimizer.zero_grad()
             predict = local_model(img)
             loss = criterion(predict, label)
@@ -97,7 +100,7 @@ def train_client(id, global_round_num, client_dataloader, global_model, num_loca
             ground_truth_imgs.append(image)
             gt_data = image.to(device)
             gt_data = gt_data.view(1, *gt_data.size())
-            gt_label = torch.Tensor([label]).long().to(device)
+            gt_label = torch.Tensor([label_mapping[label]]).long().to(device)
             gt_label = gt_label.view(1,)
             idlg = iDLG(model = local_model, orig_img=image, gt_data=gt_data, label=gt_label, device=device)
             dummy_data, label_pred, history, losses, ssim_vals, psnr_vals, mse_vals = idlg.attack()
