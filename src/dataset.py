@@ -4,6 +4,10 @@ from torch.utils.data import DataLoader, TensorDataset, Dataset, Subset, random_
 import torchvision
 import random
 
+def remap_labels(labels, class_indices):
+    remapped_labels = [class_indices.index(label) for label in labels]
+    return remapped_labels
+
 def get_indices(dataset, classes):
     """
     This function retrieves indices of dataset samples that belong to the specified classes.
@@ -34,7 +38,6 @@ class CIFARDataset:
 
             self.train_dataset = Subset(full_train_dataset, train_indices)
             self.validation_dataset = Subset(full_validation_dataset, validation_indices)
-            
 
     def get_dataset(self):
         return self.train_dataset, self.validation_dataset
@@ -56,7 +59,6 @@ class SplitDataset(Dataset):
     
 def get_dataset():
     transform = transforms.Compose([transforms.ToTensor()])
-    
     train_dataset = torchvision.datasets.CIFAR10('./data', train=True, download=True, transform=transform)
     test_dataset = torchvision.datasets.CIFAR10('./data', train=False, download=True, transform=transform)
     return train_dataset, test_dataset

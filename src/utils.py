@@ -20,16 +20,16 @@ def plot_class_distribution(client_dataloaders, selected_classes):
     bottom = np.zeros(num_clients)
     colors = plt.cm.get_cmap('viridis', num_selected_classes)
 
-    fig, ax = plt.subplots(figsize=(10, 6))
-    for idx, class_label in enumerate(selected_classes):
-        ax.bar(clients, class_counts[class_label], bottom=bottom,
-               label=f'Class {class_label}', color=colors(idx))
-        bottom += class_counts[class_label]
+    # fig, ax = plt.subplots(figsize=(10, 6))
+    # for idx, class_label in enumerate(selected_classes):
+    #     ax.bar(clients, class_counts[class_label], bottom=bottom,
+    #            label=f'Class {class_label}', color=colors(idx))
+    #     bottom += class_counts[class_label]
 
-    ax.set_ylabel('Count')
-    ax.set_title('Class distribution across clients')
-    ax.legend(title="Classes")
-    plt.show()
+    # ax.set_ylabel('Count')
+    # ax.set_title('Class distribution across clients')
+    # ax.legend(title="Classes")
+    #plt.savefig("./class_distribution.png")
 
 def average_weights(w):
     w_avg = copy.deepcopy(w[0])
