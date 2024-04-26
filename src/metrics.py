@@ -1,9 +1,11 @@
-from skimage.metrics import structural_similarity as ssim
 from skimage.metrics import peak_signal_noise_ratio as psnr
+from torchmetrics.image import StructuralSimilarityIndexMeasure as ssim
 import numpy as np
 from torchvision.transforms.functional import to_pil_image, to_tensor
 from torchvision.transforms import ToTensor 
 import torch
+from torchvision import transforms
+from PIL import Image
 import cv2
 
 class Metrics:
@@ -12,6 +14,14 @@ class Metrics:
         self.ground_truth_imgs = ground_truth_imgs
         self.reconstructed_imgs = reconstructed_imgs
         self.to_tensor = ToTensor()
+
+    def to_tensor_and_unsqueeze(self, image):
+        if not isinstance(image, Image.Image):
+            if isinstance(image, np.ndarray):
+                image = Image.fromarray(image)
+            elif isinstance(image, torch.Tensor):
+                return image.unsqueeze(0) if image.ndim == 3 else image
+        return transforms.ToTensor()(image).unsqueeze(0)
 
     def _ensure_tensor(self, img):
         if not isinstance(img, torch.Tensor):
@@ -41,32 +51,21 @@ class Metrics:
 
     def compute_ssim(self):
         ssim_scores = []
+        ssim_ = ssim()
 
         for gt_img, rec_img in zip(self.ground_truth_imgs, self.reconstructed_imgs):
-            gt_np = self._to_numpy(gt_img)
-            rec_np = self._to_numpy(rec_img)
+            gt_tensor = self.to_tensor_and_unsqueeze(gt_img)
+            rec_tensor = self.to_tensor_and_unsqueeze(rec_img)
 
-            if gt_np.ndim == 3:
-                gt_gray = cv2.cvtColor(gt_np, cv2.COLOR_BGR2GRAY)
-            else:
-                gt_gray = gt_np
+            if rec_tensor.dtype != gt_tensor.dtype:
+                gt_tensor = gt_tensor.to(rec_tensor.dtype)
 
-            if rec_np.ndim == 3:
-                rec_gray = cv2.cvtColor(rec_np, cv2.COLOR_BGR2GRAY)
-            else:
-                rec_gray = rec_np
-
-            if gt_gray.dtype == np.float32 or gt_gray.dtype == np.float64:
-                data_range = 1.0
-            else:
-                data_range = 255
-
-            ssim_score = ssim(gt_gray, rec_gray, data_range=data_range)
-            ssim_scores.append(ssim_score)
+            ssim_score = ssim_(rec_tensor, gt_tensor) 
+            ssim_scores.append(ssim_score.item())
 
         average_ssim = np.mean(ssim_scores) if ssim_scores else float('nan')
         return average_ssim
-
+   
     def compute_psnr(self):
         psnr_vals = []
         for gt_img, rec_img in zip(self.ground_truth_imgs, self.reconstructed_imgs):
@@ -76,7 +75,10 @@ class Metrics:
             rec_np = self._tensor_to_np(rec_tensor)
             psnr_val = psnr(gt_np, rec_np, data_range=rec_np.max() - rec_np.min())
             psnr_vals.append(psnr_val)
-        average_psnr = np.mean(psnr_vals)
+        
+        psnr_vals_array = np.array(psnr_vals)
+        psnr_vals_filtered = psnr_vals_array[np.isfinite(psnr_vals_array)]
+        average_psnr = np.mean(psnr_vals_filtered) if psnr_vals_filtered.size > 0 else float('nan')
         return average_psnr
     
 

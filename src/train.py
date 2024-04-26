@@ -15,10 +15,11 @@ def test_accuracy(model, test_dataloader, device):
     model.eval()
     num_correct = 0
     total = 0
+    label_mapping = {0: 0, 9: 1, 6: 2, 1: 3, 8: 4}
     with torch.no_grad():
         for (index, (img, label)) in enumerate(test_dataloader):
             img = img.to(device)
-            label = label.to(device)
+            label = torch.tensor([label_mapping[l.item()] for l in label], device=device)
             predict = model(img)
             num_correct += torch.sum(torch.argmax(predict, dim=1) == label).item()
             total += img.shape[0]
@@ -30,10 +31,11 @@ def train_accuracy(model, train_dataloader, device):
     model.eval()
     num_correct = 0
     total = 0
+    label_mapping = {0: 0, 9: 1, 6: 2, 1: 3, 8: 4}
     with torch.no_grad():
         for (index, (img, label)) in enumerate(train_dataloader):
             img = img.to(device)
-            label = label.to(device)
+            label = torch.tensor([label_mapping[l.item()] for l in label], device=device)
             predict = model(img)
             num_correct += torch.sum(torch.argmax(predict, dim=1) == label).item()
             total += img.shape[0]
@@ -65,14 +67,15 @@ def train_client(id, global_round_num, client_dataloader, global_model, num_loca
     optimizer = torch.optim.Adam(local_model.parameters(), lr=lr)
 
     #parameters for pruning
-    thres = 30
-    alpha = alpha
+    thres = 95
+
+    label_mapping = {0: 0, 9: 1, 6: 2, 1: 3, 8: 4}
 
     mse, psnr, ssim = None, None, None
 
     for epoch in range(num_local_epochs):
         for (index, (img, label)) in enumerate(client_dataloader):
-            img, label = img.to(device), label.to(device)
+            img, label = img.to(device), torch.tensor([label_mapping[l.item()] for l in label], device=device)
             optimizer.zero_grad()
             predict = local_model(img)
             loss = criterion(predict, label)
@@ -95,30 +98,22 @@ def train_client(id, global_round_num, client_dataloader, global_model, num_loca
                 image, label = filtered_train_dataset[img_index]
                 ground_truth_imgs.append(image)
                 ground_truth_labels.append(label)
-                tp = transforms.ToTensor()
-                tt = transforms.ToPILImage()
-            
+
                 gt_data = image.to(device)
                 gt_data = gt_data.view(1, *gt_data.size())
 
-                gt_label = torch.Tensor([label]).long().to(device)
+                gt_label = torch.Tensor([label_mapping[label]]).long().to(device)
                 gt_label = gt_label.view(1,)
 
                 idlg = iDLG(model = local_model, gt_data=gt_data, label=gt_label, device=device)
                 dummy_data, label_predict, history, losses = idlg.attack()
                 extracted_labels.append(label_predict)
-                iteration = 300
                 reconstructed_imgs.append(history[-1])
 
             metrics = Metrics(ground_truth_imgs, reconstructed_imgs)
-            print("\n")
-            print(f"Client {id}, epoch {epoch}, reconstruction performance using iDLG:")
             mse = metrics.compute_mse()
-            print(f"Mean squared error: {mse}")
             psnr = metrics.compute_psnr()
-            print(f"Peak Signal-to-Noise-Ratio: {psnr}")
             ssim = metrics.compute_ssim()
-            print(f"Structural Similiarity Index Measure: {ssim}")
 
             ground_truth_imgs_for_plotting = [prepare_tensor_for_plotting(img.squeeze(0)) for img in ground_truth_imgs]
             plt.figure(figsize=(20, 10))
@@ -147,7 +142,7 @@ def train_client(id, global_round_num, client_dataloader, global_model, num_loca
                 save_path = os.path.join(save_path, f"client_{id}_iDLG.png")
                 
             plt.savefig(save_path, dpi = 800)
-            plt.cla()
+            plt.close()
 
     return local_model, mse, psnr, ssim
 
@@ -169,10 +164,7 @@ def federated_learning_experiment(global_model, num_clients_per_round, num_local
     mse_vals = []
 
     for round in range(max_rounds):
-        # print("\n")
-        # print(f"Round {round} is starting")
         clients = np.random.choice(np.arange(5), num_clients_per_round, replace=False)
-        #print(f"Clients for round {round} are: {clients}")
         global_model.eval()
         global_model = global_model.to(device)
         running_avg = None 
@@ -182,7 +174,6 @@ def federated_learning_experiment(global_model, num_clients_per_round, num_local
         client_mse = []
 
         for index, client in enumerate(clients):
-            #print(f"round {round}, starting client {(index+1)}/{num_clients_per_round}, id: {client}")
             local_model, mse, psnr, ssim = train_client(client, round, client_train_loader[client], global_model, num_local_epochs, lr, device=device, criterion=criterion, filtered_train_dataset=filtered_train_dataset[client], idlg=idlg, prune=prune, alpha=alpha)
             running_avg = global_model_average(running_avg, local_model.state_dict(), 1/num_clients_per_round) 
 
@@ -196,8 +187,6 @@ def federated_learning_experiment(global_model, num_clients_per_round, num_local
         global_model.load_state_dict(running_avg)
         test_accuracy_ = test_accuracy(global_model, test_dataloader, device)
         train_accuracy_ = train_accuracy(global_model, train_dataloader, device)
-
-        #print(f"Round {round}, validation accuracy: {test_accuracy_*100} %")
         round_train_accuracy.append(train_accuracy_)
         round_test_accuracy.append(test_accuracy_)
         ssim_vals.append(np.mean(client_ssim))
