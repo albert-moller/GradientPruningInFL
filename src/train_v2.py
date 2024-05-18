@@ -55,8 +55,8 @@ class FederatedLearning:
         thres = 95
 
         label_mapping = {0: 0, 9: 1, 6: 2, 1: 3, 8: 4}
-        psnr = None
-        ssim = None
+        psnr = []
+        ssim = []
 
         for epoch in range(self.num_local_epochs):
             for (index, (img, label)) in enumerate(client_dataloader):
@@ -92,24 +92,26 @@ class FederatedLearning:
                         dummy_data, label_pred, history, losses, final_grad_diff, psnr_vals, ssim_vals = idlg.attack()
                         results[attempt] = (history[-1], final_grad_diff, psnr_vals[-1], ssim_vals[-1])
 
-                    best_attempt = min(results, key=lambda attempt: results[attempt][1])
-                    best_reconstructed_image = results[best_attempt][0]
+                   
+                    psnr_values = [result[2] for result in results.values() if not np.isnan(result[2])]
+                    ssim_values = [result[3] for result in results.values() if not np.isnan(result[3])]
+                  
+                    median_psnr = np.median(psnr_values) if psnr_values else float('nan')
+                    median_ssim = np.median(ssim_values) if ssim_values else float('nan')
+
+                    def combined_metric(result):
+                        psnr_diff = abs(result[2] - median_psnr) if not np.isnan(result[2]) else float('inf')
+                        ssim_diff = abs(result[3] - median_ssim) if not np.isnan(result[3]) else float('inf')
+                        return psnr_diff + ssim_diff
+
+                    best_attempt_key = min(results, key=lambda k: combined_metric(results[k]))
+                    best_attempt = results[best_attempt_key]
+                    best_reconstructed_image = best_attempt[0]
                     reconstructed_imgs.append(best_reconstructed_image)
                     ground_truth_imgs.append(image)
 
-                total_psnr = sum(map(lambda attempt: results[attempt][2], results))
-                total_ssim = sum(map(lambda attempt: results[attempt][3], results))
-                num_attempts = len(results)
-
-                psnr = total_psnr / num_attempts
-                ssim = total_ssim / num_attempts
-
-                print("PSNR: ", psnr)
-                print("SSIM: ", ssim)
-
-                # metrics = Metrics(ground_truth_imgs, reconstructed_imgs)
-                # psnr = metrics.compute_psnr()
-                # ssim = metrics.compute_ssim()
+                    psnr.append(np.mean(psnr_values))
+                    ssim.append(np.mean(ssim_values))
 
                 ground_truth_imgs_for_plotting = [self.prepare_tensor_for_plotting(img.squeeze(0)) for img in ground_truth_imgs]
                 
@@ -140,8 +142,11 @@ class FederatedLearning:
                     
                 plt.savefig(save_path, dpi = 800)
                 plt.close()
-        
-        return local_model, psnr, ssim
+
+        if psnr and ssim:
+            return local_model, np.mean(psnr), np.mean(ssim)
+        else:
+            return local_model, None, None
     
     def global_model_average(self, curr, next, scale):
         if curr == None:
