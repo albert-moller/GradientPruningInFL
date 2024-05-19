@@ -121,12 +121,13 @@ class TrainExperiment:
         psnr_values = []
         ssim_values = []
 
-        for _ in tqdm(range(50), desc="Performing iDLG for different dummy data"):
-            idlg = ModifiediDLG(model=self.local_model, gt_data = gt_data, label=gt_label, device=self.device, orig_img=image)
+        while len(psnr_values) < 50:
+            idlg = ModifiediDLG(model=self.local_model, gt_data=gt_data, label=gt_label, device=self.device, orig_img=image)
             dummy_data, label_pred, history, losses, final_grad_diff, psnr_vals, ssim_vals = idlg.attack()
-            grad_diffs.append(final_grad_diff.detach().cpu().item())
-            psnr_values.append(psnr_vals)
-            ssim_values.append(ssim_vals)
+            if not (np.isnan(psnr_vals[-1]) or np.isnan(ssim_vals[-1])):
+                grad_diffs.append(final_grad_diff.detach().cpu().item())
+                psnr_values.append(psnr_vals[-1])
+                ssim_values.append(ssim_vals[-1])
         
         return grad_diffs, psnr_values, ssim_values
 
