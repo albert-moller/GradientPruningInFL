@@ -92,21 +92,23 @@ def train_client(id, global_round_num, client_dataloader, global_model, num_loca
         if epoch == 0 and idlg is True and global_round_num == 0:
 
             #Perform gradient inversion attack using iDLG:
-            reconstructed_imgs = []
-            ground_truth_imgs = []
+            psnr_vals_attempts = []
+            ssim_vals_attempts = []
 
-            #Choose image 18 for reconstruction
-            image, label = filtered_train_dataset[18]
-            ground_truth_imgs.append(image)
-            gt_data = image.to(device)
-            gt_data = gt_data.view(1, *gt_data.size())
-            gt_label = torch.Tensor([label_mapping[label]]).long().to(device)
-            gt_label = gt_label.view(1,)
-            idlg = iDLG(model = local_model, orig_img=image, gt_data=gt_data, label=gt_label, device=device)
-            dummy_data, label_pred, history, losses, ssim_vals, psnr_vals, mse_vals = idlg.attack()
-            reconstructed_imgs.append(history[-1])
+            for _ in range(15):
+                #Choose image 18 for reconstruction
+                image, label = filtered_train_dataset[18]
+                gt_data = image.to(device)
+                gt_data = gt_data.view(1, *gt_data.size())
+                gt_label = torch.Tensor([label_mapping[label]]).long().to(device)
+                gt_label = gt_label.view(1,)
+                idlg = iDLG(model = local_model, orig_img=image, gt_data=gt_data, label=gt_label, device=device)
+                dummy_data, label_pred, history, losses, ssim_vals, psnr_vals, mse_vals = idlg.attack()
             
-    return dummy_data, local_model, image, history, ssim_vals, psnr_vals, mse_vals
+                psnr_vals_attempts.append(psnr_vals)
+                ssim_vals_attempts.append(ssim_vals)
+
+    return dummy_data, local_model, image, history, psnr_vals_attempts, ssim_vals_attempts, mse_vals
 
 def global_model_average(curr, next, scale):
     if curr == None:
@@ -128,7 +130,7 @@ def federated_learning_experiment(global_model, num_clients_per_round, num_local
 
         for index, client in enumerate(clients):
             print(f"round {round}, starting client {(index+1)}/{num_clients_per_round}, id: {client}")
-            dummy_data, local_model, image, history, ssim_vals, psnr_vals, mse_vals = train_client(client, round, client_train_loader[client], global_model, num_local_epochs, lr, device=device, criterion=criterion, filtered_train_dataset=filtered_train_dataset[client], idlg=idlg, prune=prune, alpha=alpha)
+            dummy_data, local_model, image, history, psnr_vals, ssim_vals, mse_vals = train_client(client, round, client_train_loader[client], global_model, num_local_epochs, lr, device=device, criterion=criterion, filtered_train_dataset=filtered_train_dataset[client], idlg=idlg, prune=prune, alpha=alpha)
             running_avg = global_model_average(running_avg, local_model.state_dict(), 1/num_clients_per_round) 
 
     return dummy_data, image, history, ssim_vals, psnr_vals, mse_vals
